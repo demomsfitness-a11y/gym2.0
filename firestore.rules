@@ -1,0 +1,243 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny Catch-all)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY PRIMITIVES ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true ||
+        request.auth.token.email != null ||
+        request.auth.token.firebase.sign_in_provider == 'phone' ||
+        request.auth.token.firebase.sign_in_provider == 'anonymous'
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'demo.msfitness@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- ENTITY SCHEMA VALIDATIONS ---
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 128 &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 128)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+             (!('membershipStatus' in data) || (data.membershipStatus is string && data.membershipStatus in ['none', 'pending', 'approved', 'active', 'expired'])) &&
+             (!('activePlanId' in data) || (data.activePlanId is string && data.activePlanId.size() <= 128)) &&
+             (!('activePlanName' in data) || (data.activePlanName is string && data.activePlanName.size() <= 128)) &&
+             (!('membershipExpiryDate' in data) || (data.membershipExpiryDate is string && data.membershipExpiryDate.size() <= 64)) &&
+             (!('joinedAt' in data) || (data.joinedAt is string && data.joinedAt.size() <= 64)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64)) &&
+             (!('gender' in data) || (data.gender is string && data.gender.size() <= 32)) &&
+             (!('age' in data) || (data.age is string && data.age.size() <= 16)) &&
+             (!('emergencyContact' in data) || (data.emergencyContact is string && data.emergencyContact.size() <= 128)) &&
+             (!('fitnessGoals' in data) || (data.fitnessGoals is string && data.fitnessGoals.size() <= 512)) &&
+             (!('medicalConditions' in data) || (data.medicalConditions is string && data.medicalConditions.size() <= 512));
+    }
+
+    function isValidMembershipRequest(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.planId is string && data.planId.size() <= 128 &&
+             data.status is string && data.status in ['pending', 'approved', 'active', 'expired'] &&
+             (!('userName' in data) || (data.userName is string && data.userName.size() <= 128)) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 128)) &&
+             (!('planName' in data) || (data.planName is string && data.planName.size() <= 128)) &&
+             (!('price' in data) || (data.price is number)) &&
+             (!('duration' in data) || (data.duration is string && data.duration.size() <= 64)) &&
+             (!('paymentMethod' in data) || (data.paymentMethod is string && data.paymentMethod.size() <= 64)) &&
+             (!('paymentProof' in data) || (data.paymentProof is string && data.paymentProof.size() <= 2048)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp)) &&
+             (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 1024)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+             (!('gender' in data) || (data.gender is string && data.gender.size() <= 32)) &&
+             (!('age' in data) || (data.age is string && data.age.size() <= 16)) &&
+             (!('emergencyContact' in data) || (data.emergencyContact is string && data.emergencyContact.size() <= 128)) &&
+             (!('fitnessGoals' in data) || (data.fitnessGoals is string && data.fitnessGoals.size() <= 512)) &&
+             (!('medicalConditions' in data) || (data.medicalConditions is string && data.medicalConditions.size() <= 512));
+    }
+
+    function isValidGroupClass(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 128 &&
+             data.time is string && data.time.size() <= 64 &&
+             data.day is string && data.day.size() <= 64 &&
+             data.capacity is number &&
+             (!('trainerId' in data) || (data.trainerId is string && data.trainerId.size() <= 128)) &&
+             (!('trainerName' in data) || (data.trainerName is string && data.trainerName.size() <= 128)) &&
+             (!('bookedCount' in data) || (data.bookedCount is number)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp));
+    }
+
+    function isValidBooking(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.status is string && data.status in ['booked', 'cancelled'] &&
+             (!('userName' in data) || (data.userName is string && data.userName.size() <= 128)) &&
+             (!('classId' in data) || (data.classId is string && data.classId.size() <= 128)) &&
+             (!('className' in data) || (data.className is string && data.className.size() <= 128)) &&
+             (!('trainerId' in data) || (data.trainerId is string && data.trainerId.size() <= 128)) &&
+             (!('trainerName' in data) || (data.trainerName is string && data.trainerName.size() <= 128)) &&
+             (!('time' in data) || (data.time is string && data.time.size() <= 64)) &&
+             (!('date' in data) || (data.date is string && data.date.size() <= 64)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 512)) &&
+             (!('experienceLevel' in data) || (data.experienceLevel is string && data.experienceLevel.size() <= 64));
+    }
+
+    function isValidAnnouncement(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 256 &&
+             data.content is string && data.content.size() <= 10000 &&
+             (!('isPinned' in data) || (data.isPinned is bool)) &&
+             (!('scheduledFor' in data) || (data.scheduledFor is string)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp));
+    }
+
+    function isValidSupportTicket(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.subject is string && data.subject.size() <= 256 &&
+             data.message is string && data.message.size() <= 10000 &&
+             data.status is string && data.status in ['open', 'closed'] &&
+             (!('userName' in data) || (data.userName is string && data.userName.size() <= 128)) &&
+             (!('priority' in data) || (data.priority is string && data.priority in ['low', 'medium', 'high'])) &&
+             (!('replies' in data) || (data.replies is list)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp));
+    }
+
+    // --- COLLECTION RULE DEFINITIONS ---
+
+    // 1. Users Collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow create: if isVerifiedUser() && isOwner(userId) && isValidUser(incoming());
+      allow update: if isVerifiedUser() && (
+        (isOwner(userId) && isValidUser(incoming()) && !('role' in incoming())) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 2. Membership Requests
+    match /membershipRequests/{requestId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && incoming().userId == request.auth.uid && isValidMembershipRequest(incoming());
+      allow update: if isVerifiedUser() && (
+        (resource.data.userId == request.auth.uid && incoming().userId == request.auth.uid && incoming().status == resource.data.status && isValidMembershipRequest(incoming())) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 3. Group Classes
+    match /groupClasses/{classId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() || (
+        // Allow users to increment bookedCount when booking
+        isVerifiedUser() && request.method == 'update' && incoming().diff(existing()).affectedKeys().hasOnly(['bookedCount'])
+      );
+    }
+
+    // 4. Bookings
+    match /bookings/{bookingId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && incoming().userId == request.auth.uid && isValidBooking(incoming());
+      allow update: if isVerifiedUser() && (
+        (resource.data.userId == request.auth.uid && incoming().userId == request.auth.uid && isValidBooking(incoming())) ||
+        isAdmin()
+      ) ;
+      allow delete: if isAdmin() || (isVerifiedUser() && resource.data.userId == request.auth.uid);
+    }
+
+    // 5. Announcements
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 6. Trainers
+    match /trainers/{trainerId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 7. Support Tickets
+    match /supportTickets/{ticketId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && incoming().userId == request.auth.uid && isValidSupportTicket(incoming());
+      allow update: if isVerifiedUser() && (
+        (resource.data.userId == request.auth.uid && incoming().userId == request.auth.uid && isValidSupportTicket(incoming())) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 8. Contact Submissions
+    match /contactSubmissions/{submissionId} {
+      allow read, update, delete: if isAdmin();
+      allow create: if isValidContactSubmission(incoming());
+    }
+
+    function isValidContactSubmission(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 128 &&
+             data.email is string && data.email.size() <= 128 &&
+             data.message is string && data.message.size() <= 10000 &&
+             data.status is string && data.status in ['unread', 'read', 'replied'] &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+             (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 1024)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp));
+    }
+
+    // 9. Gallery
+    match /gallery/{mediaId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 10. Website Content
+    match /websiteContent/{contentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 11. Admins Explicit List
+    match /admins/{adminId} {
+      allow read: if isVerifiedUser();
+      allow write: if isAdmin();
+    }
+  }
+}
